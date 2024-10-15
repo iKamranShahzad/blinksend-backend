@@ -12,7 +12,7 @@ const io = new Server(server, {
     origin: "http://localhost:5173",
     methods: ["GET", "POST"],
   },
-  maxHttpBufferSize: 5e6, // 5 MB max file size
+  maxHttpBufferSize: 5e6, // 5 MB max file size for now
 });
 
 const users = new Map();
