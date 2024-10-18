@@ -4,12 +4,18 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 
 const app = express();
-app.use(cors());
+
+// Set up CORS with environment variable
+const corsOptions = {
+  origin: process.env.CORS_ORIGIN || "*", // Use environment variable for allowed origin in production
+  methods: ["GET", "POST"],
+};
+app.use(cors(corsOptions));
 
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: process.env.CORS_ORIGIN || "*", // Same origin setting for WebSocket connection
     methods: ["GET", "POST"],
   },
   maxHttpBufferSize: 5e6, // 5 MB max file size for now
@@ -64,7 +70,8 @@ io.on("connection", (socket) => {
   });
 });
 
-const PORT = 3001;
+// Use the dynamic port provided by Render or default to 3001
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
