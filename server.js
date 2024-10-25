@@ -7,7 +7,7 @@ const app = express();
 
 // Set up CORS with environment variable
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN || "*", // Use environment variable for allowed origin in production
+  origin: process.env.CORS_ORIGIN || "*",
   methods: ["GET", "POST"],
 };
 app.use(cors(corsOptions));
