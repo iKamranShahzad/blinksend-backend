@@ -1,77 +1,121 @@
 const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
+const WebSocket = require("ws");
 const cors = require("cors");
 
 const app = express();
+app.use(cors());
 
-// Set up CORS with environment variable
-const corsOptions = {
-  origin: process.env.CORS_ORIGIN || "*",
-  methods: ["GET", "POST"],
-};
-app.use(cors(corsOptions));
+// Create WebSocket server
+const wss = new WebSocket.Server({ port: 8080 });
 
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: process.env.CORS_ORIGIN || "*", // Same origin
-    methods: ["GET", "POST"],
-  },
-  maxHttpBufferSize: 5e6, // 5 MB max file size for now
-});
+// Store connected devices and ongoing transfers
+const connectedDevices = new Map();
+const activeTransfers = new Map();
 
-const users = new Map();
+wss.on("connection", (ws) => {
+  console.log("New client connected");
 
-io.on("connection", (socket) => {
-  console.log("A user connected");
+  ws.on("message", (message) => {
+    try {
+      const data = JSON.parse(message);
 
-  socket.on("set_name", (name) => {
-    users.set(socket.id, { id: socket.id, name });
-    io.emit("users", Array.from(users.values()));
-  });
+      switch (data.type) {
+        case "register":
+          // Add new device to connected devices
+          const deviceId = data.device.id;
+          connectedDevices.set(deviceId, {
+            ...data.device,
+            ws,
+          });
+          broadcastDevices();
+          break;
 
-  socket.on("send_file_offer", (data) => {
-    const receiver = io.sockets.sockets.get(data.to);
-    if (receiver) {
-      receiver.emit("file_offer", {
-        from: socket.id,
-        name: data.name,
-        size: data.size,
-      });
+        case "file-transfer":
+          handleFileTransfer(ws, data);
+          break;
+      }
+    } catch (error) {
+      console.error("Error processing message:", error);
     }
   });
 
-  socket.on("accept_file", (data) => {
-    const sender = io.sockets.sockets.get(data.from);
-    if (sender) {
-      sender.emit("file_accepted", { to: socket.id });
+  ws.on("close", () => {
+    // Remove disconnected device
+    for (const [deviceId, device] of connectedDevices.entries()) {
+      if (device.ws === ws) {
+        connectedDevices.delete(deviceId);
+        break;
+      }
     }
-  });
-
-  socket.on("reject_file", (data) => {
-    const sender = io.sockets.sockets.get(data.from);
-    if (sender) {
-      sender.emit("file_rejected", { to: socket.id });
-    }
-  });
-
-  socket.on("file_chunk", (data) => {
-    const receiver = io.sockets.sockets.get(data.to);
-    if (receiver) {
-      receiver.emit("file_chunk", data);
-    }
-  });
-
-  socket.on("disconnect", () => {
-    console.log("A user disconnected");
-    users.delete(socket.id);
-    io.emit("users", Array.from(users.values()));
+    broadcastDevices();
+    console.log("Client disconnected");
   });
 });
 
-// Use the dynamic port provided by Render or default to 3001 not okay
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+function handleFileTransfer(senderWs, data) {
+  const { transfer, targetDevice, chunk } = data;
+  const targetDeviceConn = connectedDevices.get(targetDevice);
+
+  if (!targetDeviceConn) {
+    senderWs.send(
+      JSON.stringify({
+        type: "transfer-error",
+        transferId: transfer.id,
+        error: "Target device not found",
+      })
+    );
+    return;
+  }
+
+  // Initialize or get transfer data
+  if (!activeTransfers.has(transfer.id)) {
+    activeTransfers.set(transfer.id, {
+      chunks: new Array(transfer.totalChunks),
+      receivedChunks: 0,
+    });
+  }
+
+  const transferData = activeTransfers.get(transfer.id);
+  transferData.chunks[transfer.currentChunk] = chunk;
+  transferData.receivedChunks++;
+
+  // Acknowledge chunk receipt
+  senderWs.send(
+    JSON.stringify({
+      type: "chunk-received",
+      transferId: transfer.id,
+      chunkIndex: transfer.currentChunk,
+    })
+  );
+
+  // If all chunks received, send complete file to target
+  if (transferData.receivedChunks === transfer.totalChunks) {
+    const completeFile = new Uint8Array(
+      transferData.chunks.reduce((acc, chunk) => [...acc, ...chunk], [])
+    );
+
+    targetDeviceConn.ws.send(
+      JSON.stringify({
+        type: "file-received",
+        fileName: transfer.fileName,
+        fileData: Array.from(completeFile),
+      })
+    );
+
+    // Clean up transfer data
+    activeTransfers.delete(transfer.id);
+  }
+}
+
+function broadcastDevices() {
+  const deviceList = Array.from(connectedDevices.values()).map(
+    ({ ws, ...device }) => device
+  );
+  const message = JSON.stringify({ type: "devices", devices: deviceList });
+
+  for (const device of connectedDevices.values()) {
+    device.ws.send(message);
+  }
+}
+
+console.log("WebSocket server running on port 8080");
