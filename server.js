@@ -14,6 +14,7 @@ const activeTransfers = new Map();
 
 const uniqueNames = [
   "Harry",
+  "Drake",
   "Hermione",
   "Ron",
   "Luna",
