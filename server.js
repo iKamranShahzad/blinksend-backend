@@ -18,6 +18,7 @@ const uniqueNames = [
   "Jake Paul",
   "Django",
   "Hermione",
+  "Zayn",
   "Ron",
   "Luna",
   "Dobby",
