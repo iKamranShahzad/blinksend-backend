@@ -10,7 +10,7 @@ const wss = new WebSocket.Server({ port: 8080 });
 
 // These two maps store the connected devices and active file transfers
 const connectedDevices = new Map();
-const activeTransfers = new Map();
+//const activeTransfers = new Map();
 
 const uniqueNames = [
   "Harry",
@@ -129,6 +129,8 @@ wss.on("connection", (ws) => {
 
 // Function to handle file transfer in chunks
 
+// server.js
+
 function handleFileTransfer(senderWs, data) {
   const { transfer, targetDevice, chunk } = data;
   const targetDeviceConn = connectedDevices.get(targetDevice);
@@ -143,24 +145,22 @@ function handleFileTransfer(senderWs, data) {
     return;
   }
 
-  // Initialize transfer data if not present
-  if (!activeTransfers.has(transfer.id)) {
-    activeTransfers.set(transfer.id, {
-      chunks: {},
-      receivedChunks: 0,
-      totalChunks: transfer.totalChunks,
-    });
-  }
+  // Forward the chunk directly to the target device
+  targetDeviceConn.ws.send(
+    JSON.stringify({
+      type: "file-chunk",
+      transfer: {
+        id: transfer.id,
+        fileName: transfer.fileName,
+        fileSize: transfer.fileSize,
+        currentChunk: transfer.currentChunk,
+        totalChunks: transfer.totalChunks,
+      },
+      chunk: chunk,
+    })
+  );
 
-  const transferData = activeTransfers.get(transfer.id);
-
-  // Convert chunk array to Buffer
-  const chunkBuffer = Buffer.from(chunk);
-
-  transferData.chunks[transfer.currentChunk] = chunkBuffer;
-  transferData.receivedChunks++;
-
-  // Acknowledge chunk receipt to sender
+  // Acknowledge receipt to the sender
   senderWs.send(
     JSON.stringify({
       type: "chunk-received",
@@ -168,41 +168,6 @@ function handleFileTransfer(senderWs, data) {
       chunkIndex: transfer.currentChunk,
     })
   );
-
-  // When all chunks are received, assemble and send the file
-  if (transferData.receivedChunks === transferData.totalChunks) {
-    const orderedChunks = [];
-    for (let i = 0; i < transferData.totalChunks; i++) {
-      if (transferData.chunks[i] !== undefined) {
-        orderedChunks.push(transferData.chunks[i]);
-      } else {
-        console.error(`Missing chunk ${i} for transfer ${transfer.id}`);
-        senderWs.send(
-          JSON.stringify({
-            type: "transfer-error",
-            transferId: transfer.id,
-            error: `Missing chunk ${i}`,
-          })
-        );
-        return;
-      }
-    }
-
-    // Concatenate all chunks using Buffer.concat
-    const fileBuffer = Buffer.concat(orderedChunks);
-
-    // Send the assembled file to the target device
-    targetDeviceConn.ws.send(
-      JSON.stringify({
-        type: "file-received",
-        fileName: transfer.fileName,
-        fileData: Array.from(fileBuffer), // Convert Buffer to array for JSON serialization
-      })
-    );
-
-    // Clean up transfer data
-    activeTransfers.delete(transfer.id);
-  }
 }
 
 console.log("WebSocket server running on port 8080");
