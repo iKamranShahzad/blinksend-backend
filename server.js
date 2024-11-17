@@ -132,7 +132,6 @@ wss.on("connection", (ws) => {
 function handleFileTransfer(senderWs, data) {
   const { transfer, targetDevice, chunk } = data;
   const targetDeviceConn = connectedDevices.get(targetDevice);
-
   if (!targetDeviceConn) {
     senderWs.send(
       JSON.stringify({
@@ -144,19 +143,24 @@ function handleFileTransfer(senderWs, data) {
     return;
   }
 
-  // Initializing the new transfer data
+  // Initialize transfer data if not present
   if (!activeTransfers.has(transfer.id)) {
     activeTransfers.set(transfer.id, {
-      chunks: new Array(transfer.totalChunks),
+      chunks: {},
       receivedChunks: 0,
+      totalChunks: transfer.totalChunks,
     });
   }
 
   const transferData = activeTransfers.get(transfer.id);
-  transferData.chunks[transfer.currentChunk] = chunk;
+
+  // Convert chunk array to Buffer
+  const chunkBuffer = Buffer.from(chunk);
+
+  transferData.chunks[transfer.currentChunk] = chunkBuffer;
   transferData.receivedChunks++;
 
-  // Acknowledge chunk receipt to sender & target
+  // Acknowledge chunk receipt to sender
   senderWs.send(
     JSON.stringify({
       type: "chunk-received",
@@ -165,21 +169,38 @@ function handleFileTransfer(senderWs, data) {
     })
   );
 
-  // If all chunks received, send complete file to target device
-  if (transferData.receivedChunks === transfer.totalChunks) {
-    const completeFile = transferData.chunks.reduce(
-      (acc, chunk) => acc.concat(chunk),
-      []
-    );
+  // When all chunks are received, assemble and send the file
+  if (transferData.receivedChunks === transferData.totalChunks) {
+    const orderedChunks = [];
+    for (let i = 0; i < transferData.totalChunks; i++) {
+      if (transferData.chunks[i] !== undefined) {
+        orderedChunks.push(transferData.chunks[i]);
+      } else {
+        console.error(`Missing chunk ${i} for transfer ${transfer.id}`);
+        senderWs.send(
+          JSON.stringify({
+            type: "transfer-error",
+            transferId: transfer.id,
+            error: `Missing chunk ${i}`,
+          })
+        );
+        return;
+      }
+    }
+
+    // Concatenate all chunks using Buffer.concat
+    const fileBuffer = Buffer.concat(orderedChunks);
+
+    // Send the assembled file to the target device
     targetDeviceConn.ws.send(
       JSON.stringify({
         type: "file-received",
         fileName: transfer.fileName,
-        fileData: completeFile,
+        fileData: Array.from(fileBuffer), // Convert Buffer to array for JSON serialization
       })
     );
 
-    // Clean up transfer data after sending the complete file
+    // Clean up transfer data
     activeTransfers.delete(transfer.id);
   }
 }
