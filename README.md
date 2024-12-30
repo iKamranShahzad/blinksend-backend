@@ -8,7 +8,7 @@ BlinkSend is a simple and secure web application designed to share files instant
 
 <div align="center">
 
-<img src="https://skillicons.dev/icons?i=nodejs,express,websocket" />
+<img src="https://skillicons.dev/icons?i=nodejs,express,github" />
 
 </div>
 
