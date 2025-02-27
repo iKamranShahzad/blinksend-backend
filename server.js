@@ -245,52 +245,29 @@ function handleFileTransfer(senderWs, data) {
     return;
   }
 
-  // Create a smaller metadata object
-  const transferMetadata = {
-    id: transfer.id,
-    fileName: transfer.fileName,
-    fileSize: transfer.fileSize,
-    currentChunk: transfer.currentChunk,
-    totalChunks: transfer.totalChunks,
-  };
-
   // Forward the chunk directly to the target device
-  // Use a more efficient approach to send large data
-  try {
-    let message = JSON.stringify({
+  targetDeviceConn.ws.send(
+    JSON.stringify({
       type: "file-chunk",
-      transfer: transferMetadata,
+      transfer: {
+        id: transfer.id,
+        fileName: transfer.fileName,
+        fileSize: transfer.fileSize,
+        currentChunk: transfer.currentChunk,
+        totalChunks: transfer.totalChunks,
+      },
       chunk: chunk,
-    });
+    })
+  );
 
-    targetDeviceConn.ws.send(message);
-
-    // Clean up the message variable to help garbage collection
-    message = null;
-
-    // Acknowledge receipt to the sender with minimal data
-    senderWs.send(
-      JSON.stringify({
-        type: "chunk-received",
-        transferId: transfer.id,
-        chunkIndex: transfer.currentChunk,
-      })
-    );
-  } catch (error) {
-    console.error("Error sending chunk:", error.message);
-    senderWs.send(
-      JSON.stringify({
-        type: "transfer-error",
-        transferId: transfer.id,
-        error: "Failed to send chunk",
-      })
-    );
-  }
-
-  // Force garbage collection if available
-  if (global.gc) {
-    global.gc();
-  }
+  // Acknowledge receipt to the sender
+  senderWs.send(
+    JSON.stringify({
+      type: "chunk-received",
+      transferId: transfer.id,
+      chunkIndex: transfer.currentChunk,
+    })
+  );
 }
 
 console.log("WebSocket server running on port 8080");
