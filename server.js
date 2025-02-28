@@ -53,7 +53,7 @@ const uniqueNames = [
 ];
 const assignedNames = new Map(); // this map will store the assigned names
 
-// Function to get a unique name for a device kinda cheeky way to get a unique name
+// Function to get a unique name for a device
 function getUniqueName() {
   let name = uniqueNames[Math.floor(Math.random() * uniqueNames.length)];
   while (assignedNames.has(name)) {
@@ -62,7 +62,7 @@ function getUniqueName() {
   return name;
 }
 
-// Function to broadcast the list of connected devices to all clients (prolly filter out the current device from the list)
+// Function to broadcast the list of connected devices to all clients
 function broadcastDevices(roomId) {
   const roomDevices = rooms.get(roomId);
   if (!roomDevices) return;
@@ -132,7 +132,17 @@ function joinRoom(ws, deviceId, roomId) {
   broadcastDevices(roomId);
 }
 
-// WebSocket server event handlers (connection, message, close)
+// Find which room a device belongs to
+function findDeviceRoom(deviceId) {
+  for (const [roomId, devices] of rooms.entries()) {
+    if (devices.has(deviceId)) {
+      return roomId;
+    }
+  }
+  return null;
+}
+
+// WebSocket server event handlers
 wss.on("connection", (ws) => {
   console.log("New client connected");
   let currentDeviceId = null;
@@ -186,8 +196,23 @@ wss.on("connection", (ws) => {
           joinRoom(ws, currentDeviceId, data.roomId);
           break;
 
-        case "file-transfer":
-          handleFileTransfer(ws, data);
+        // WebRTC signaling messages
+        case "rtc-offer":
+        case "rtc-answer":
+        case "rtc-candidate":
+          // Forwarding CHEEKY WebRTC signaling messages to the target device
+          const targetDeviceConn = connectedDevices.get(data.to);
+          if (targetDeviceConn) {
+            data.from = currentDeviceId;
+            targetDeviceConn.ws.send(JSON.stringify(data));
+          } else {
+            ws.send(
+              JSON.stringify({
+                type: "error",
+                message: "Target device not found",
+              })
+            );
+          }
           break;
 
         default:
@@ -209,7 +234,6 @@ wss.on("connection", (ws) => {
     }
   });
 
-  // Keep the existing close handler
   ws.on("close", () => {
     if (currentDeviceId) {
       connectedDevices.delete(currentDeviceId);
@@ -229,45 +253,5 @@ wss.on("connection", (ws) => {
     }
   });
 });
-
-// Function to handle file transfer in chunks
-function handleFileTransfer(senderWs, data) {
-  const { transfer, targetDevice, chunk } = data;
-  const targetDeviceConn = connectedDevices.get(targetDevice);
-  if (!targetDeviceConn) {
-    senderWs.send(
-      JSON.stringify({
-        type: "transfer-error",
-        transferId: transfer.id,
-        error: "Target device not found",
-      })
-    );
-    return;
-  }
-
-  // Forward the chunk directly to the target device
-  targetDeviceConn.ws.send(
-    JSON.stringify({
-      type: "file-chunk",
-      transfer: {
-        id: transfer.id,
-        fileName: transfer.fileName,
-        fileSize: transfer.fileSize,
-        currentChunk: transfer.currentChunk,
-        totalChunks: transfer.totalChunks,
-      },
-      chunk: chunk,
-    })
-  );
-
-  // Acknowledge receipt to the sender
-  senderWs.send(
-    JSON.stringify({
-      type: "chunk-received",
-      transferId: transfer.id,
-      chunkIndex: transfer.currentChunk,
-    })
-  );
-}
 
 console.log("WebSocket server running on port 8080");
