@@ -106,6 +106,7 @@ function createRoom(ws, deviceId) {
     JSON.stringify({
       type: "room-created",
       roomId,
+      message: `You created room ${roomId}`,
     })
   );
   broadcastDevices(roomId);
@@ -122,13 +123,35 @@ function joinRoom(ws, deviceId, roomId) {
     return;
   }
 
-  rooms.get(roomId).add(deviceId);
+  const deviceName = assignedNames.get(deviceId) || "Unknown device";
+
+  // Notify the joining device
   ws.send(
     JSON.stringify({
       type: "room-joined",
       roomId,
+      message: `You joined room ${roomId}`,
     })
   );
+
+  // Notify other devices in the room about the new device
+  const roomDevices = rooms.get(roomId);
+  for (const existingDeviceId of roomDevices) {
+    if (existingDeviceId !== deviceId) {
+      const device = connectedDevices.get(existingDeviceId);
+      if (device && device.ws) {
+        device.ws.send(
+          JSON.stringify({
+            type: "device-joined",
+            deviceName,
+          })
+        );
+      }
+    }
+  }
+
+  // Add device to the room
+  roomDevices.add(deviceId);
   broadcastDevices(roomId);
 }
 
@@ -236,20 +259,36 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     if (currentDeviceId) {
-      connectedDevices.delete(currentDeviceId);
-      assignedNames.delete(currentDeviceId);
+      const deviceName = assignedNames.get(currentDeviceId) || "Unknown device";
 
-      for (const [roomId, devices] of rooms.entries()) {
-        if (devices.has(currentDeviceId)) {
-          devices.delete(currentDeviceId);
-          if (devices.size === 0) {
-            rooms.delete(roomId);
-          } else {
-            broadcastDevices(roomId);
+      // Find which room the device was in
+      const roomId = findDeviceRoom(currentDeviceId);
+      if (roomId) {
+        const devices = rooms.get(roomId);
+        devices.delete(currentDeviceId);
+
+        // Notify remaining devices about the departure
+        for (const deviceId of devices) {
+          const device = connectedDevices.get(deviceId);
+          if (device && device.ws) {
+            device.ws.send(
+              JSON.stringify({
+                type: "device-left",
+                deviceName,
+              })
+            );
           }
-          break;
+        }
+
+        if (devices.size === 0) {
+          rooms.delete(roomId);
+        } else {
+          broadcastDevices(roomId);
         }
       }
+
+      connectedDevices.delete(currentDeviceId);
+      assignedNames.delete(currentDeviceId);
     }
   });
 });
