@@ -219,6 +219,53 @@ wss.on("connection", (ws) => {
           joinRoom(ws, currentDeviceId, data.roomId);
           break;
 
+        case "leave-room":
+          if (!currentDeviceId || !connectedDevices.has(currentDeviceId)) {
+            ws.send(
+              JSON.stringify({
+                type: "room-error",
+                message: "Device not registered",
+              })
+            );
+            return;
+          }
+
+          const deviceRoom = findDeviceRoom(currentDeviceId);
+          if (deviceRoom) {
+            const deviceName =
+              assignedNames.get(currentDeviceId) || "Unknown device";
+            const devices = rooms.get(deviceRoom);
+            devices.delete(currentDeviceId);
+
+            // Notify the client that they left
+            ws.send(
+              JSON.stringify({
+                type: "room-left",
+                roomId: deviceRoom,
+              })
+            );
+
+            // Notify remaining devices
+            for (const deviceId of devices) {
+              const device = connectedDevices.get(deviceId);
+              if (device && device.ws) {
+                device.ws.send(
+                  JSON.stringify({
+                    type: "device-left",
+                    deviceName,
+                  })
+                );
+              }
+            }
+
+            if (devices.size === 0) {
+              rooms.delete(deviceRoom);
+            } else {
+              broadcastDevices(deviceRoom);
+            }
+          }
+          break;
+
         // WebRTC signaling messages
         case "rtc-offer":
         case "rtc-answer":
